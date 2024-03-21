@@ -1,4 +1,5 @@
 import numpy as np
+import time 
 
 class Layer:
   def __init__(self, ipt, out):
@@ -9,13 +10,13 @@ class Layer:
     self.biases = np.zeros(out)
 
   def activation(self, x):
-    return 1/(1 + np.e**(-x))
+    return 1/(1 + np.exp(-x))
   def activation_derivative(self, x):
     y = self.activation(x)
-    return y*(1-y)
+    return self.activation(x)*(1-self.activation(x))
   def process(self, inputs):
     return self.activation(np.dot(inputs, self.weights) + self.biases)
-    
+
 
 
 class Model:
@@ -32,69 +33,72 @@ class Model:
 
   def Cost(self, otp, expected):
     return np.sum((otp - expected) ** 2)/len(otp)
-
-  def train(self, inputs, learning_rate):
+    
+  def train(self, inputs, learning_rate=0.1, epochs=1, batch_size=1):
+    for _ in range(epochs):
+      for i in range(0, len(inputs), batch_size): # 0 is necessary
+        batch = inputs[i:i+batch_size]
+        
+        [self.__internal_train(b, learning_rate) for b in batch]
+    
+  def __internal_train(self, inputs, learning_rate):
     # dC/dw =  dz/dw * da/dz * dc/da
     # dC/daL-1 = sum(dz/daL-1 * da/dz * dc/daL)
-    d, expected = inputs.data, inputs.expected
-    activations = [d]
+    activations, expected = [inputs.data], inputs.expected
 
     for layer in self.layers:
-      d = layer.process(d)
-      activations.append(d)
+      activations.append(layer.process(activations[-1]))
 
     # Last layer
     weight_grad = np.zeros(self.layers[-1].weights.shape)
     bias_grad = np.zeros(self.layers[-1].biases.shape)
-    activation_derivatives = np.zeros(self.layers[-1].ipt)
-    weight_grads = []
-    bias_grads = []
+    activation_derivatives = [np.zeros(self.layers[-1].ipt)]
+
     for k in range(self.layers[-1].ipt):
-      ad = 0
-      for j in range(self.layers[-1].out):
-        dcdw = 2 * (activations[-1][j] - expected[j]) * self.layers[-1].activation_derivative(activations[-1][j]) * activations[-2][k]
-        weight_grad[k][j] = dcdw
-        if k == 0:
-          dcdb = 2 * (activations[-1][j] - expected[j]) * self.layers[-1].activation_derivative(activations[-1][j])
-          bias_grad[j] = dcdb
-        ad += 2 * (activations[-1][j] - expected[j]) * self.layers[-1].activation_derivative(activations[-1][j]) * self.layers[-1].weights[k][j]
-      activation_derivatives[k] = ad
-    weight_grads.append(weight_grad)
-    bias_grads.append(bias_grad)
+      dcdz = 2 * (activations[-1] - expected) * self.layers[-1].activation_derivative(activations[-1])
+
+      if k == 0:
+          bias_grad = dcdz * 1
+      weight_grad[k] = dcdz * activations[-2][k]
+
+      activation_derivatives[0][k] = np.sum(dcdz * self.layers[-1].weights[k])
+      
+    self.layers[-1].biases -= learning_rate * bias_grad
+    self.layers[-1].weights -= learning_rate * weight_grad
+    
+    
     for i in range(len(self.layers) - 1):
       weight_grad = np.zeros(self.layers[-i-2].weights.shape)
       bias_grad = np.zeros(self.layers[-i-2].biases.shape)
-      new_activation_derivatives = np.zeros(self.layers[-i-2].ipt)
+      
+      if i != len(self.layers) - 2:
+        activation_derivatives.append(np.zeros(self.layers[-i-2].ipt))
+        
       for k in range(self.layers[-i-2].ipt):
-        ad=0
-        for j in range(self.layers[-i-2].out):
-          dcdw = activation_derivatives[j] * self.layers[-i-2].activation_derivative(activations[-i-2][j]) * activations[-i-3][k]
-          weight_grad[k][j] = dcdw
-          if k == 0:
-            dcdb = activation_derivatives[j] * self.layers[-i-2].activation_derivative(activations[-i-2][j])
-            bias_grad[j] = dcdb
-          ad += self.layers[-i-2].activation_derivative(activations[-i-2][j]) * self.layers[-i-2].weights[k][j] * activation_derivatives[j]
-        new_activation_derivatives[k] = ad
-      
-      activation_derivatives = new_activation_derivatives[:]
-      weight_grads.append(weight_grad)
-      bias_grads.append(bias_grad)
-    for i, (wg, bg) in enumerate(zip(weight_grads, bias_grads)):
-      self.layers[-i-1].weights -= learning_rate * wg
-      self.layers[-i-1].biases -= learning_rate * bg
+        dadw = activation_derivatives[0] * self.layers[-i-2].activation_derivative(activations[-i-2])
+        if k == 0:
+          bias_grad = dadw * 1
+        weight_grad[k] = dadw * activations[-i-3][k]
+        if i != len(self.layers) - 2:
+          activation_derivatives[-1][k] = np.sum(dadw * self.layers[-i-2].weights[k])
 
-      
+      activation_derivatives.pop(0)
+      self.layers[-i-2].weights -= learning_rate * weight_grad
+      self.layers[-i-2].biases -= learning_rate * bias_grad
+
+
 class Inputs:
   def __init__(self, data, expected):
     self.data = np.array(data)
     self.expected = np.array(expected)
 
 
-i = Inputs([1, -0.5, 3], [0.5, 0])
+i = Inputs([1, -0.5, 3], [0.5, 0.5])
+t = Inputs([0, -45, 11], [0.5, 0.5])
 m = Model([3, 2, 2])
 print(m.process(i))
 print(m.process(i, cost=True))
-for _ in range(100):
-  m.train(i, 0.1)
+for q in range(100):
+  m.train([i, t], 0.1)
 print(m.process(i))
-print(m.process(i, cost=True))
+print(m.process(t, cost=True))
